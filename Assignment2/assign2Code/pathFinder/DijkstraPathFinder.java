@@ -5,199 +5,275 @@ import map.PathMap;
 
 import java.util.*;
 
-public class DijkstraPathFinder implements PathFinder
-{
-    private final int INVALID_POINT = -1;
+public class DijkstraPathFinder implements PathFinder {
+    public class PriorityQueue {
+        private List<PathNode> scanned;
+        private List<PathNode> pathNodes;
+
+        public PriorityQueue() {
+            this.pathNodes = new ArrayList<>();
+            this.scanned = new ArrayList<>();
+        }
+
+        public void add(PathNode newNode) {
+            for (PathNode pathNode : this.scanned) {
+                if (pathNode.point.equals(newNode.point)) {
+                    return;
+                }
+            }
+
+            for (PathNode pathNode : this.pathNodes) {
+                if (pathNode.point.equals(newNode.point)) {
+                    if (pathNode.weight > newNode.weight) {
+                        this.pathNodes.remove(pathNode);
+                        this.pathNodes.add(newNode);
+                    }
+                    return;
+                }
+            }
+
+            this.pathNodes.add(newNode);
+        }
+
+        public PathNode next() {
+            PathNode smallest = this.pathNodes.get(0);
+
+            for (PathNode pathNode : this.pathNodes) {
+                if (pathNode.weight < smallest.weight) {
+                    smallest = pathNode;
+                }
+            }
+
+            this.pathNodes.remove(smallest);
+            this.scanned.add(smallest);
+            return smallest;
+        }
+
+        public boolean isEmpty() {
+            return this.pathNodes.isEmpty();
+        }
+    }
+
     private PathMap pathMap;
 
-    private PathNode[][][] paths;
-    // stores the data from djikstra's algorithm for each origin and waypoint
-    // first index refers to which cell djikstra's algorithm is applied to
-    // first being the origin maps, the rest being waypoints
-    // second index refers to the row
-    // third index refers to the column
+    private Map<
+        Coordinate,
+        Map<Coordinate, PathNode>
+    > dijkstraCalculations = new HashMap<>();
 
-    // index of the paths referring to the source which djikstra's algorithm is being performed on
-    private int checkingIndex;
+    public static <E> List<List<E>> recursivePermutate(List<E> paramList) {
+        if (paramList.size() == 0) {
+            return new ArrayList<>();
+        }
 
+		if (paramList.size() == 1) {
+			final List<List<E>> returnLists = new ArrayList<>();
+			returnLists.add(paramList);
+			return returnLists;
+
+		}
+
+		List<List<E>> returnLists = new ArrayList<>();
+		for (E fixedItem : paramList) {
+
+			List<E> smallerList = new ArrayList<>(paramList);
+			smallerList.remove(fixedItem);
+;
+			for (List<E> subList : recursivePermutate(smallerList)) {
+				subList.add(0, fixedItem);
+				returnLists.add(subList);
+			}
+		}
+
+		return returnLists;
+	}
+
+	public List<Coordinate> getFromPermutation(List<Coordinate> permutation) {
+        List<Coordinate> path = new ArrayList<>();
+        for (int i = 0; i < permutation.size() - 1; i++) {
+            Coordinate startCoord = permutation.get(i);
+            Coordinate endCoord = permutation.get(i + 1);
+            List<Coordinate> subPath = dijkstraCalculations.get(startCoord).get(endCoord).coordinatesTo(i == permutation.size() - 2);
+
+            path.addAll(subPath);
+        }
+        return path;
+    }
 
     public DijkstraPathFinder(PathMap map) {
         pathMap = map;
     } // end of DijkstraPathFinder()
 
-
-
     @Override
     public List<Coordinate> findPath() {
-        // You can replace this with your favourite list, but note it must be a
-        // list type
-//        List<Coordinate> path = new ArrayList<Coordinate>();
-
-        // Below creates the data from djikstra's algorithm for each origin and waypoint
-        paths = new PathNode[pathMap.waypointCells.size()+pathMap.originCells.size()]
-                [pathMap.sizeR][pathMap.sizeC];
-        for (int i = 0; i < pathMap.originCells.size(); ++i) {
-            checkingIndex = i;
-            initialisePathMap(pathMap.originCells.get(i));
+        for (Coordinate coord : this.pathMap.originCells) {
+            dijkstraCalculations.put(coord, initialisePathMap(coord));
         }
-        for (int i = 0; i < pathMap.waypointCells.size(); ++i) {
-            checkingIndex = i + pathMap.originCells.size();
-            initialisePathMap(pathMap.waypointCells.get(i));
+        for (Coordinate coord : this.pathMap.waypointCells) {
+            dijkstraCalculations.put(coord, initialisePathMap(coord));
         }
 
-        /* for loop used to list all the data in the first map, made for debug purposes
-        for (int i = 0; i < pathMap.sizeR; ++i) {
-            for (int j =0; j < pathMap.sizeC; ++j) {
-                if (paths[0][i][j] == null)
-                    System.out.println("Row: " + i + " Col: " + j + " is null");
-                else
-                    System.out.println("Row: " + i + " Col: " + j + " Source (col,row): (" + paths[0][i][j].c + "," + paths[0][i][j].r + ") Length: " + paths[0][i][j].length);
-            }
-        }
-        */
+        List<List<Coordinate>> permutations = DijkstraPathFinder.recursivePermutate(this.pathMap.waypointCells);
+        List<List<Coordinate>> newPermutations = new ArrayList<>();
+        for (Coordinate origin : this.pathMap.originCells) {
+            for (Coordinate destination : this.pathMap.destCells) {
+                if (permutations.size() == 0) {
+                    List<Coordinate> newPermutation = new ArrayList<>();
+                    newPermutations.add(newPermutation);
 
-        LinkedList<Coordinate> path = new LinkedList<>();
-        if (pathMap.waypointCells.size() == 0) { // code block run for Task A, B and C
-            int sourceIndex = INVALID_POINT;
-            int pathLength = INVALID_POINT;
-            int destIndex = INVALID_POINT;
-            for (int i = 0; i < pathMap.originCells.size(); ++i) {  // loops to check which source and destination
-                for (int j = 0; j < pathMap.destCells.size(); ++j){ // combination gives the shortest distance
-                    if (paths[i][pathMap.destCells.get(j).getRow()][pathMap.destCells.get(j).getColumn()] != null) {
-                        if (pathLength == INVALID_POINT || pathLength >
-                                paths[i][pathMap.destCells.get(j).getRow()][pathMap.destCells.get(j).getColumn()].length) {
-                            sourceIndex = i;
-                            pathLength = paths[i][pathMap.destCells.get(j).getRow()][pathMap.destCells.get(j).getColumn()].length;
-                            destIndex = j;
-                        }
-                    }
+                    newPermutation.add(origin);
+                    newPermutation.add(destination);
+                }
+
+                for (List<Coordinate> waypointPermutation : permutations) {
+                    List<Coordinate> newPermutation = new ArrayList<>(waypointPermutation);
+                    newPermutations.add(newPermutation);
+
+                    newPermutation.add(0, origin);
+                    newPermutation.add(destination);
                 }
             }
-            // below code block creates the list of coordinates, working backwards from the destination
-            int r = pathMap.destCells.get(destIndex).getRow();
-            int c = pathMap.destCells.get(destIndex).getColumn();
-            while (r != pathMap.originCells.get(sourceIndex).getRow()
-                    || c != pathMap.originCells.get(sourceIndex).getColumn()) {
-                path.addFirst(pathMap.cells[r][c]);
-                int rTemp = paths[sourceIndex][r][c].r;
-                int cTemp = paths[sourceIndex][r][c].c;
-                r = rTemp;
-                c = cTemp;
+        }
+
+        int smallestWeight = Integer.MAX_VALUE;
+        List<Coordinate> smallestPermutation = null;
+        // At this point, all the permutations will be setup C:
+        start: for (List<Coordinate> permutation : newPermutations) {
+            System.out.println("STARTING NEXT PERMUTATION");
+            int weight = 0;
+            for (int i = 0; i < permutation.size() - 1; i++) {
+                Coordinate startCoord = permutation.get(i);
+                Coordinate endCoord = permutation.get(i + 1);
+                weight += dijkstraCalculations.get(startCoord).get(endCoord).weight;
+                if (weight >= smallestWeight) {
+                    System.out.println("WEIGHT IS GREATER");
+                    continue start;
+                }
             }
-            path.addFirst(pathMap.originCells.get(sourceIndex));
-        } // end of code block run for Task A, B and C
-        return path;
-    } // end of findPath()
+
+            if (weight < smallestWeight) {
+                smallestWeight = weight;
+                smallestPermutation = permutation;
+            }
+        }
+
+        return this.getFromPermutation(smallestPermutation);
+    }
 
 
     @Override
     public int coordinatesExplored() {
         // TODO: Implement (optional)
-
-        // placeholder
         return 0;
-    } // end of cellsExplored()
+    }
+
+    private Map<Coordinate, PathNode> initialisePathMap(Coordinate source) {
+        PriorityQueue scannedPoints = new PriorityQueue();
+
+        HashMap<Coordinate, PathNode> weights = new HashMap<>();
+
+        Coordinate sourcePoint = new Coordinate(source.getRow(), source.getColumn());
+        PathNode sourcePathNode = new PathNode(sourcePoint, 0, new ArrayList<>());
+
+        weights.put(sourcePoint, sourcePathNode);
+
+        List<PathNode> adjacentPathNodes = getAdjacentToPoint(sourcePathNode);
+        for (PathNode adjacentPathNode : adjacentPathNodes) {
+            scannedPoints.add(adjacentPathNode);
+        }
+
+        while (!scannedPoints.isEmpty()) {
+            PathNode currentPathNode = scannedPoints.next();
+            adjacentPathNodes = getAdjacentToPoint(currentPathNode);
+            weights.put(currentPathNode.point, currentPathNode);
+
+            for (PathNode adjacentPathNode : adjacentPathNodes) {
+                scannedPoints.add(adjacentPathNode);
+            }
+        }
+
+        return weights;
+    }
 
     /**
+     * Returns all the adjacent points and their weights
+     * Weight is calculated as terrain cost + prevNode weight.
+     * When adding to the priority queue, an adjacent node may override any
+     * current pathNode in it, if the weight is smaller
      *
-     * @param source - the coordinate of which the path is being found from
+     * @param pathNode: The PathNode that we want to find the adjacent PathNodes to
+     * @return A list of the adjacent PathNodes
      */
-    private void initialisePathMap(Coordinate source) {
-        // boolean array to store which  coordinates are used already and shortest path known
-        boolean[][] foundCoords = new boolean[pathMap.sizeC][pathMap.sizeR];
-        paths[checkingIndex][source.getRow()][source.getColumn()] = new PathNode(0);
-        paths[checkingIndex][source.getRow()][source.getColumn()].r = INVALID_POINT;
-        paths[checkingIndex][source.getRow()][source.getColumn()].c = INVALID_POINT;
-        checkAdjacents(source.getRow(),source.getColumn(), 0);
-        foundCoords[source.getRow()][source.getColumn()] = true;
-        while (true) {
-            int c = INVALID_POINT;
-            int r = INVALID_POINT;
-            int length = INVALID_POINT;
-            for (int i = 0; i < pathMap.sizeR; ++i) {       // loops for coordinates
-                for (int j = 0; j < pathMap.sizeC; ++j) {
-                    if (!foundCoords[i][j]) {   // checks if it hasn't already been found
-                        if (paths[checkingIndex][i][j] != null) {   // checks if null, can't use null values
-                            if (length == INVALID_POINT || length > paths[checkingIndex][i][j].length) { // checks if there isn't a better target cell already determined
-                                r = i;
-                                c = j;
-                                length = paths[checkingIndex][i][j].length;
-                            }
-                        }
-                    }
-                }
-            }
-            if (length != INVALID_POINT) {
-                checkAdjacents(r, c, length);
-                foundCoords[r][c] = true;
-            } else {break;}
+    private List<PathNode> getAdjacentToPoint(PathNode pathNode) {
+        List<PathNode> adjacentPoints = new ArrayList<>();
+        Coordinate point = pathNode.point;
+
+        final int row = point.getRow();
+        final int column = point.getColumn();
+
+        final double prevWeight = pathNode.pathTo.size() > 0 ? pathNode.pathTo.get(pathNode.pathTo.size() - 1).weight : 0;
+
+        if (row > 0) {
+            Coordinate adj = new Coordinate(row - 1, column);
+            adjacentPoints.add(new PathNode(adj, getWeight(adj) + prevWeight, pathNode));
         }
+        if (row < this.pathMap.sizeR - 1) {
+            Coordinate adj = new Coordinate(row + 1, column);
+            adjacentPoints.add(new PathNode(adj, getWeight(adj) + prevWeight, pathNode));
+        }
+
+        if (column > 0) {
+            Coordinate adj = new Coordinate(row, column - 1);
+            adjacentPoints.add(new PathNode(adj, getWeight(adj) + prevWeight, pathNode));
+        }
+        if (column < this.pathMap.sizeR - 1) {
+            Coordinate adj = new Coordinate(row, column + 1);
+            adjacentPoints.add(new PathNode(adj, getWeight(adj) + prevWeight, pathNode));
+        }
+
+        return adjacentPoints;
     }
 
-    /**
-     * method checks the neighbours of the current node to see if they are in the array,
-     * calls check to see if the node is to be changed
-     * @param r - row to be checked
-     * @param c - column to be checked
-     * @param length - the length taken to get to this point
-     */
-    private void checkAdjacents(int r, int c, int length) {
-        if (r-1 >= 0) {
-            if (checkAdd(r-1,c,length)) {
-                paths[checkingIndex][r-1][c].r = r;
-                paths[checkingIndex][r-1][c].c = c;
-            }
-        }
-        if (r+1 != pathMap.sizeR) {
-            if (checkAdd(r+1,c,length)) {
-                paths[checkingIndex][r+1][c].r = r;
-                paths[checkingIndex][r+1][c].c = c;
-            }
-        }
-        if (c-1 >= 0) {
-            if (checkAdd(r,c-1,length)) {
-                paths[checkingIndex][r][c-1].r = r;
-                paths[checkingIndex][r][c-1].c = c;
-            }
-        }
-        if (c+1 != pathMap.sizeC) {
-            if (checkAdd(r,c+1,length)) {
-                paths[checkingIndex][r][c+1].r = r;
-                paths[checkingIndex][r][c+1].c = c;
-
-            }
-        }
+    private double getWeight(Coordinate point) {
+        final Coordinate coordinate = pathMap.cells[point.getRow()][point.getColumn()];
+        return !coordinate.getImpassable() ? coordinate.getTerrainCost() : Double.POSITIVE_INFINITY;
     }
 
-    /**
-     *
-     * @return - returns true if the node is a shorter path in length then what already exists,
-     *           additionally will create and set the length to the node if it is a shorter path/there isn't a path
-     */
-    private boolean checkAdd(int r, int c, int length) {
-        if (paths[checkingIndex][r][c] != null) {
-            if (paths[checkingIndex][r][c].length <= length + pathMap.cells[r][c].getTerrainCost()) {
-                return false;
-            }
-        }
-        if (pathMap.cells[r][c].getImpassable())
-            return false;
-        paths[checkingIndex][r][c] = new PathNode(length + pathMap.cells[r][c].getTerrainCost());
-        return true;
-
-    }
-
-    /**
-     * a class used to store the details for the path from a node gathered by the path map
-     * has a row and column which contain the source node which this node came from
-     */
     private class PathNode {
-        public int r; //row of source
-        public int c; // column of source
-        public int length; // length of path to this node
+        public Coordinate point; // The current place of it
+        public double weight; // The weight to get to the node
+        public List<PathNode> pathTo; // The path up to, not including, the node.
 
-        public PathNode(int length) {
-            this.length = length;
+        // TODO Consider making pathTo un nullable.
+        public PathNode (Coordinate point, double weight, List<PathNode> pathTo) {
+            this.point = point;
+            this.weight = weight;
+            this.pathTo = pathTo;
+        }
+
+        public PathNode(Coordinate point, double weight, PathNode prevPathNode) {
+            this.point = point;
+            this.weight = weight;
+            this.pathTo = new ArrayList<>(prevPathNode.pathTo != null ? prevPathNode.pathTo : new ArrayList<>());
+            this.pathTo.add(prevPathNode);
+        }
+
+        public List<Coordinate> coordinatesTo() {
+            return coordinatesTo(true);
+        }
+
+        public List<Coordinate> coordinatesTo(boolean inclusiveOfEnd) {
+            ArrayList<Coordinate> coordinatesTo = new ArrayList<>();
+
+            for (PathNode node : this.pathTo) {
+                coordinatesTo.add(node.point);
+            }
+
+            if (inclusiveOfEnd) {
+                coordinatesTo.add(this.point);
+            }
+
+            return coordinatesTo;
         }
     }
 
